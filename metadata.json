@@ -1,0 +1,6 @@
+{
+  "name": "Qubex Tech Solutions",
+  "description": "Digital product design, custom software engineering, and technology solutions studio.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
