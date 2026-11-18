@@ -7,10 +7,12 @@ from .views import (
     AdminLogoutView,
     AdminSessionView,
     CsrfTokenView,
+    HealthCheckView,
     PublicEnquiryCreateView,
 )
 
 urlpatterns = [
+    path("health", HealthCheckView.as_view(), name="api-health"),
     path("csrf-token", CsrfTokenView.as_view(), name="csrf-token"),
     path("enquiries", PublicEnquiryCreateView.as_view(), name="enquiry-create"),
     path("admin/auth/login", AdminLoginView.as_view(), name="admin-login"),

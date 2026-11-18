@@ -73,9 +73,19 @@ async function parseJsonSafely<T>(response: Response): Promise<T | null> {
   }
 }
 
+function buildApiUrl(path: string): string {
+  const base = (
+    (import.meta as unknown as { env?: Record<string, string | undefined> }).env
+      ?.VITE_API_BASE_URL || ''
+  )
+    .trim()
+    .replace(/\/+$/, '');
+  return `${base}${path}`;
+}
+
 async function fetchCsrfToken(): Promise<string> {
   for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await fetch('/api/csrf-token', {
+    const response = await fetch(buildApiUrl('/api/csrf-token'), {
       method: 'GET',
       credentials: 'include',
       headers: { Accept: 'application/json' },
@@ -116,7 +126,7 @@ export async function submitProjectEnquiry(
   } | null = null;
 
   for (let attempt = 0; attempt < 2; attempt++) {
-    response = await fetch('/api/enquiries', {
+    response = await fetch(buildApiUrl('/api/enquiries'), {
       method: 'POST',
       credentials: 'include',
       headers: {

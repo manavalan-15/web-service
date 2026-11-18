@@ -81,12 +81,22 @@ function buildAuthHeaders(extra: Record<string, string> = {}): Record<string, st
   };
 }
 
+function buildApiUrl(path: string): string {
+  const base = (
+    (import.meta as unknown as { env?: Record<string, string | undefined> }).env
+      ?.VITE_API_BASE_URL || ''
+  )
+    .trim()
+    .replace(/\/+$/, '');
+  return `${base}${path}`;
+}
+
 export async function checkAdminSession(): Promise<{
   authenticated: boolean;
   admin?: AdminUser;
   csrfToken?: string;
 }> {
-  const res = await fetch('/api/admin/auth/me', {
+  const res = await fetch(buildApiUrl('/api/admin/auth/me'), {
     method: 'GET',
     credentials: 'include',
     headers: buildAuthHeaders(),
@@ -113,7 +123,7 @@ export async function loginAdmin(
   identifier: string,
   password: string
 ): Promise<{ admin: AdminUser; csrfToken: string }> {
-  const csrfRes = await fetch('/api/csrf-token', {
+  const csrfRes = await fetch(buildApiUrl('/api/csrf-token'), {
     method: 'GET',
     credentials: 'include',
     headers: { Accept: 'application/json' },
@@ -125,7 +135,7 @@ export async function loginAdmin(
     csrfToken: string;
   };
 
-  const res = await fetch('/api/admin/auth/login', {
+  const res = await fetch(buildApiUrl('/api/admin/auth/login'), {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -160,7 +170,7 @@ export async function loginAdmin(
 
 export async function logoutAdmin(csrfToken: string): Promise<void> {
   try {
-    await fetch('/api/admin/auth/logout', {
+    await fetch(buildApiUrl('/api/admin/auth/logout'), {
       method: 'POST',
       credentials: 'include',
       headers: buildAuthHeaders({ 'X-CSRF-Token': csrfToken }),
@@ -188,7 +198,9 @@ export async function fetchAdminEnquiries(
   filters: AdminEnquiryFilters
 ): Promise<{ enquiries: AdminEnquiry[]; stats: AdminStats }> {
   const query = buildFilterQuery(filters);
-  const url = query ? `/api/admin/enquiries?${query}` : '/api/admin/enquiries';
+  const url = buildApiUrl(
+    query ? `/api/admin/enquiries?${query}` : '/api/admin/enquiries'
+  );
   const res = await fetch(url, {
     method: 'GET',
     credentials: 'include',
@@ -213,7 +225,7 @@ export async function updateAdminEnquiry(
   updates: { status?: EnquiryStatus; admin_notes?: string },
   csrfToken: string
 ): Promise<AdminEnquiry> {
-  const res = await fetch(`/api/admin/enquiries/${id}`, {
+  const res = await fetch(buildApiUrl(`/api/admin/enquiries/${id}`), {
     method: 'PATCH',
     credentials: 'include',
     headers: buildAuthHeaders({
@@ -240,7 +252,7 @@ export async function deleteAdminEnquiry(
   id: number,
   csrfToken: string
 ): Promise<void> {
-  const res = await fetch(`/api/admin/enquiries/${id}`, {
+  const res = await fetch(buildApiUrl(`/api/admin/enquiries/${id}`), {
     method: 'DELETE',
     credentials: 'include',
     headers: buildAuthHeaders({
@@ -263,11 +275,14 @@ export async function downloadAdminExport(
 ): Promise<void> {
   const params = new URLSearchParams(buildFilterQuery(filters));
   params.set('format', format);
-  const res = await fetch(`/api/admin/enquiries/export?${params.toString()}`, {
-    method: 'GET',
-    credentials: 'include',
-    headers: buildAuthHeaders({ Accept: '*/*' }),
-  });
+  const res = await fetch(
+    buildApiUrl(`/api/admin/enquiries/export?${params.toString()}`),
+    {
+      method: 'GET',
+      credentials: 'include',
+      headers: buildAuthHeaders({ Accept: '*/*' }),
+    }
+  );
 
   if (res.status === 401 || res.status === 403) {
     setStoredSessionToken(null);

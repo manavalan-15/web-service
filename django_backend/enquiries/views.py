@@ -2,16 +2,20 @@ import csv
 import logging
 from io import BytesIO
 from django.conf import settings
-from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.core.mail import send_mail
+from django.db import connections
 from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.middleware.csrf import get_token
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 from openpyxl import Workbook
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from .auth import issue_admin_token
 from .models import ProjectEnquiry
 from .serializers import (
     ProjectEnquiryAdminSerializer,
@@ -48,6 +52,47 @@ def filter_enquiries_queryset(request):
     return qs
 
 
+class RootStatusView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        db_ok = True
+        db_engine = settings.DATABASES["default"]["ENGINE"].rsplit(".", 1)[-1]
+        try:
+            with connections["default"].cursor() as cursor:
+                cursor.execute("SELECT 1")
+        except Exception as exc:
+            db_ok = False
+            logger.error("Health check DB error: %s", exc)
+
+        return Response(
+            {
+                "status": "ok" if db_ok else "degraded",
+                "service": "Qubex Tech Solutions Django REST API",
+                "database": db_engine,
+                "databaseConnected": db_ok,
+                "endpoints": [
+                    "/api/health",
+                    "/api/csrf-token",
+                    "/api/enquiries",
+                    "/api/admin/auth/login",
+                    "/api/admin/auth/me",
+                    "/api/admin/enquiries",
+                ],
+            }
+        )
+
+
+class HealthCheckView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        db_engine = settings.DATABASES["default"]["ENGINE"].rsplit(".", 1)[-1]
+        with connections["default"].cursor() as cursor:
+            cursor.execute("SELECT 1")
+        return Response({"status": "ok", "database": db_engine})
+
+
 class CsrfTokenView(APIView):
     permission_classes = [AllowAny]
 
@@ -55,8 +100,10 @@ class CsrfTokenView(APIView):
         return Response({"csrfToken": get_token(request)})
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class PublicEnquiryCreateView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
 
     def post(self, request):
         serializer = ProjectEnquiryCreateSerializer(data=request.data)
@@ -100,30 +147,50 @@ class PublicEnquiryCreateView(APIView):
                 "referenceId": ref_id,
                 "submittedAt": enquiry.created_at.isoformat(),
                 "emailNotificationSent": email_sent,
-                "message": "Your project enquiry has been saved securely.",
+                "message": (
+                    "Your project enquiry has been saved securely. "
+                    "Our team will review your requirements and contact you shortly."
+                ),
                 "enquiry": serializer.data,
             },
             status=status.HTTP_201_CREATED,
         )
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class AdminLoginView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
 
     def post(self, request):
         identifier = str(request.data.get("email") or request.data.get("username") or "").strip()
         password = str(request.data.get("password") or "")
+        if not identifier or not password:
+            return Response(
+                {"error": "Please enter both your admin email/username and password."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         user = authenticate(request, username=identifier, password=password)
+        if user is None and "@" in identifier:
+            User = get_user_model()
+            matched = User.objects.filter(email__iexact=identifier, is_staff=True).first()
+            if matched:
+                user = authenticate(request, username=matched.get_username(), password=password)
+
         if user is None or not user.is_staff:
             return Response(
                 {"error": "Invalid administrator credentials."},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
+
         login(request, user)
+        session_token = issue_admin_token(user.id)
         return Response(
             {
                 "authenticated": True,
                 "csrfToken": get_token(request),
+                "sessionToken": session_token,
                 "admin": {
                     "id": user.id,
                     "username": user.username,
@@ -135,9 +202,11 @@ class AdminLoginView(APIView):
 
 
 class AdminSessionView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [AllowAny]
 
     def get(self, request):
+        if not request.user or not request.user.is_authenticated or not request.user.is_staff:
+            return Response({"authenticated": False})
         return Response(
             {
                 "authenticated": True,
